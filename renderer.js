@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 let resources = [];
 const tasks = new Map();
+const earlyEvents = new Map();
 let toastTimer;
 
 function toast(message) {
@@ -73,7 +74,7 @@ function showView(name) {
 
 function updateTask(data, status) {
   let task = tasks.get(data.id);
-  if (!task) return;
+  if (!task) { earlyEvents.set(data.id, { data, status }); return; }
   if (status) task.status = status;
   if (data.received !== undefined) task.received = data.received;
   if (data.total !== undefined) task.total = data.total;
@@ -137,9 +138,10 @@ $('start-download').onclick = async () => {
   try {
     const raw = $('direct-url').value;
     const parsed = await window.suda.parse(raw);
-    const result = await window.suda.start(raw, 'auto');
+    const result = await window.suda.start(raw, $('download-mode').value);
     if (result.canceled) return;
     tasks.set(result.id, { id: result.id, name: decodeURIComponent(new URL(parsed.url).pathname.split('/').pop()) || '课程资料', status: '下载中', received: 0, total: result.size, seconds: 0, accelerated: result.accelerated });
+    if (earlyEvents.has(result.id)) { const event = earlyEvents.get(result.id); earlyEvents.delete(result.id); updateTask(event.data, event.status); }
     renderTasks(); toast('下载已开始');
   } catch (error) { toast(error.message); }
 };
