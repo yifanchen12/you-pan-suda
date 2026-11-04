@@ -26,7 +26,8 @@ function parseResource(input) {
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('仅支持 http/https 链接');
   const host = url.hostname.toLowerCase();
   const provider = providers.find(([, pattern]) => pattern.test(host))?.[0] || '其他网盘/网站';
-  const code = raw.match(/(?:提取码|访问码|密码|口令)\s*[:：]?\s*([a-z\d]{4,8})/i)?.[1] || '';
+  const code = raw.match(/(?:提取码|访问码|密码|口令)\s*[:：]?\s*([a-z\d]{4,8})/i)?.[1]
+    || ['pwd', 'password', 'passcode'].map(key => url.searchParams.get(key)).find(Boolean) || '';
   return { url: url.href, provider, code };
 }
 

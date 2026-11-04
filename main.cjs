@@ -3,9 +3,12 @@ const path = require('node:path');
 const fsp = require('node:fs/promises');
 const crypto = require('node:crypto');
 const { parseResource, safeName, inspectDirect, download } = require('./lib.cjs');
+const { resolveShare } = require('./parser.cjs');
+const external = require('./engines.cjs');
 
 let window;
 const active = new Map();
+const handedOff = new Map();
 const dataFile = () => path.join(app.getPath('userData'), 'resources.json');
 
 async function readResources() {
@@ -65,11 +68,37 @@ app.whenReady().then(() => {
     const { url } = parseResource(raw);
     return inspectDirect(url);
   });
-  ipcMain.handle('download:start', async (event, { raw, mode }) => {
+  ipcMain.handle('share:resolve', async (_event, item, endpoint) => resolveShare(item, endpoint));
+  ipcMain.handle('download:start', async (event, { raw, mode, suggestedName, engine, settings }) => {
     const { url } = parseResource(raw);
+    if (engine && engine !== 'builtin') {
+      const task = await external.submit(engine, url, suggestedName, settings);
+      let polling = false;
+      const timer = setInterval(async () => {
+        if (polling) return;
+        polling = true;
+        try {
+          const state = await external.status(task);
+          event.sender.send('download:progress', { id: task.id, received: state.received,
+            total: state.total, speed: state.speed, state: state.state });
+          if (['done', 'complete'].includes(state.state)) {
+            clearInterval(timer); handedOff.delete(task.id);
+            event.sender.send('download:complete', { id: task.id, received: state.received, total: state.total });
+          } else if (['error', 'removed'].includes(state.state)) {
+            clearInterval(timer); handedOff.delete(task.id);
+            event.sender.send('download:error', { id: task.id, message: state.message || '下载器任务失败' });
+          }
+        } catch (error) {
+          clearInterval(timer); handedOff.delete(task.id);
+          event.sender.send('download:error', { id: task.id, message: error.message });
+        } finally { polling = false; }
+      }, 2000);
+      handedOff.set(task.id, { task, timer });
+      return { id: task.id, name: task.name, size: 0, engine, accelerated: true };
+    }
     const info = await inspectDirect(url);
     const choice = await dialog.showSaveDialog(window, {
-      title: '保存课程资料', defaultPath: path.join(app.getPath('downloads'), info.filename),
+      title: '保存课程资料', defaultPath: path.join(app.getPath('downloads'), safeName(suggestedName || info.filename)),
       buttonLabel: '开始下载'
     });
     if (choice.canceled || !choice.filePath) return { canceled: true };
@@ -93,9 +122,12 @@ app.whenReady().then(() => {
       event.sender.send('download:error', { id, message: controller.signal.aborted ? '已暂停，可再次下载以续传' : error.message });
     }).finally(() => active.delete(id));
     void promise;
-    return { id, destination, size: info.size, accelerated: mode !== 'single' && info.ranges && info.size >= 2 * 1024 * 1024 };
+    return { id, destination, size: info.size, name: safeName(suggestedName || info.filename), accelerated: mode !== 'single' && info.ranges && info.size >= 2 * 1024 * 1024 };
   });
-  ipcMain.handle('download:pause', (_event, id) => { active.get(id)?.abort(); return true; });
+  ipcMain.handle('download:pause', async (_event, id) => {
+    if (handedOff.has(id)) return external.pause(handedOff.get(id).task);
+    active.get(id)?.abort(); return true;
+  });
   ipcMain.handle('file:show', (_event, location) => { shell.showItemInFolder(location); return true; });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
