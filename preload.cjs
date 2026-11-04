@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('suda', {
   open: text => ipcRenderer.invoke('link:open', text),
   inspect: text => ipcRenderer.invoke('download:inspect', text),
   resolve: (item, endpoint) => ipcRenderer.invoke('share:resolve', item, endpoint),
-  start: (raw, mode, suggestedName, engine, settings) => ipcRenderer.invoke('download:start', { raw, mode, suggestedName, engine, settings }),
+  start: (raw, mode, suggestedName, engine, settings, quarkKey) => ipcRenderer.invoke('download:start', { raw, mode, suggestedName, engine, settings, quarkKey }),
   pause: id => ipcRenderer.invoke('download:pause', id),
   showFile: location => ipcRenderer.invoke('file:show', location),
   onProgress: callback => ipcRenderer.on('download:progress', (_event, data) => callback(data)),

@@ -41,3 +41,19 @@ test('GDownload 通过本机 aria2 RPC 接收任务', async () => {
   await pause(task, mock);
   assert.equal(calls[2].body.method, 'aria2.pause');
 });
+
+test('外部下载器接收直链需要的请求头', async () => {
+  const calls = [];
+  const mock = async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => url.includes('/api/v1/tasks')
+      ? { code: 0, data: 'task-2' } : { result: 'gid-2' } };
+  };
+  const headers = { Referer: 'https://pan.quark.cn/', Cookie: 'session=test-only' };
+  await submit('gopeed', 'https://example.com/book.pdf', '教材.pdf', {}, mock, headers);
+  assert.deepEqual(calls[0].body.req.extra.header, headers);
+  await submit('gdownload', 'https://example.com/book.pdf', '教材.pdf', { secret: 'test-only' }, mock, headers);
+  assert.deepEqual(calls[1].body.params[2].header, [
+    'Referer: https://pan.quark.cn/', 'Cookie: session=test-only'
+  ]);
+});

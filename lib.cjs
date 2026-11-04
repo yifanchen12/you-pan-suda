@@ -35,14 +35,15 @@ function safeName(value) {
   return String(value || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').trim().slice(0, 120) || '课程资料';
 }
 
-async function inspectDirect(url, signal) {
+async function inspectDirect(url, signal, headers = {}, fetcher = fetch) {
   const parsed = new URL(url);
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('仅支持 http/https 下载地址');
   let size = 0;
   let ranges = false;
-  let filename = safeName(decodeURIComponent(parsed.pathname.split('/').pop() || '课程资料'));
+  let filename = safeName(parsed.pathname.split('/').pop() || '课程资料');
+  try { filename = safeName(decodeURIComponent(parsed.pathname.split('/').pop() || '课程资料')); } catch { /* use encoded name */ }
   try {
-    const head = await fetch(url, { method: 'HEAD', signal });
+    const head = await fetcher(url, { method: 'HEAD', headers, signal });
     if (head.ok) {
       size = Number(head.headers.get('content-length')) || 0;
       ranges = /bytes/i.test(head.headers.get('accept-ranges') || '');
@@ -53,7 +54,7 @@ async function inspectDirect(url, signal) {
   } catch (error) {
     if (signal?.aborted) throw error;
   }
-  const probe = await fetch(url, { headers: { Range: 'bytes=0-0' }, signal });
+  const probe = await fetcher(url, { headers: { ...headers, Range: 'bytes=0-0' }, signal });
   if (!probe.ok) throw new Error(`下载源返回 HTTP ${probe.status}`);
   if (/text\/html/i.test(probe.headers.get('content-type') || '')) {
     await probe.body?.cancel();
@@ -73,7 +74,7 @@ async function streamToFile(response, file, append, onBytes, signal) {
   await pipeline(Readable.fromWeb(response.body), counter, fs.createWriteStream(file, { flags: append ? 'a' : 'w' }), { signal });
 }
 
-async function downloadSingle(url, destination, info, signal, onProgress) {
+async function downloadSingle(url, destination, info, signal, onProgress, headers, fetcher) {
   const part = `${destination}.part`;
   const marker = `${destination}.part.json`;
   const sourceHash = crypto.createHash('sha256').update(url).digest('hex');
@@ -85,8 +86,8 @@ async function downloadSingle(url, destination, info, signal, onProgress) {
   }
   let offset = info.ranges ? (await fsp.stat(part).catch(() => ({ size: 0 }))).size : 0;
   if (info.size && offset >= info.size) offset = 0;
-  let response = await fetch(url, { headers: offset ? { Range: `bytes=${offset}-` } : {}, signal });
-  if (offset && response.status !== 206) { await response.body?.cancel(); offset = 0; response = await fetch(url, { signal }); }
+  let response = await fetcher(url, { headers: offset ? { ...headers, Range: `bytes=${offset}-` } : headers, signal });
+  if (offset && response.status !== 206) { await response.body?.cancel(); offset = 0; response = await fetcher(url, { headers, signal }); }
   if (!response.ok) throw new Error(`下载源返回 HTTP ${response.status}`);
   let received = offset;
   onProgress(received, info.size);
@@ -97,7 +98,7 @@ async function downloadSingle(url, destination, info, signal, onProgress) {
   return received;
 }
 
-async function downloadParallel(url, destination, info, signal, onProgress, segments = 4) {
+async function downloadParallel(url, destination, info, signal, onProgress, headers, fetcher, segments = 4) {
   const count = Math.min(segments, Math.ceil(info.size / (1024 * 1024)));
   const marker = `${destination}.parts.json`;
   const sourceHash = crypto.createHash('sha256').update(url).digest('hex');
@@ -121,7 +122,7 @@ async function downloadParallel(url, destination, info, signal, onProgress, segm
   onProgress(received, info.size);
   await Promise.all(blocks.map(async block => {
     if (block.existing === block.end - block.start + 1) return;
-    const response = await fetch(url, { headers: { Range: `bytes=${block.start + block.existing}-${block.end}` }, signal });
+    const response = await fetcher(url, { headers: { ...headers, Range: `bytes=${block.start + block.existing}-${block.end}` }, signal });
     if (response.status !== 206) { await response.body?.cancel(); throw new Error('下载源不支持分段传输'); }
     const expectedRange = `bytes ${block.start + block.existing}-${block.end}/${info.size}`;
     if (response.headers.get('content-range') !== expectedRange) {
@@ -149,13 +150,13 @@ async function downloadParallel(url, destination, info, signal, onProgress, segm
 }
 
 async function download(url, destination, options = {}) {
-  const { signal, onProgress = () => {}, mode = 'auto' } = options;
-  const info = await inspectDirect(url, signal);
+  const { signal, onProgress = () => {}, mode = 'auto', headers = {}, fetcher = fetch } = options;
+  const info = await inspectDirect(url, signal, headers, fetcher);
   await fsp.mkdir(path.dirname(destination), { recursive: true });
   const accelerated = mode !== 'single' && info.ranges && info.size >= 2 * 1024 * 1024;
   const bytes = accelerated
-    ? await downloadParallel(url, destination, info, signal, onProgress)
-    : await downloadSingle(url, destination, info, signal, onProgress);
+    ? await downloadParallel(url, destination, info, signal, onProgress, headers, fetcher)
+    : await downloadSingle(url, destination, info, signal, onProgress, headers, fetcher);
   return { bytes, accelerated, info };
 }
 

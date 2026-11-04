@@ -5,10 +5,12 @@ const crypto = require('node:crypto');
 const { parseResource, safeName, inspectDirect, download } = require('./lib.cjs');
 const { resolveShare } = require('./parser.cjs');
 const external = require('./engines.cjs');
+const quark = require('./quark.cjs');
 
 let window;
 const active = new Map();
 const handedOff = new Map();
+const quarkFiles = new Map();
 const dataFile = () => path.join(app.getPath('userData'), 'resources.json');
 
 async function readResources() {
@@ -68,11 +70,24 @@ app.whenReady().then(() => {
     const { url } = parseResource(raw);
     return inspectDirect(url);
   });
-  ipcMain.handle('share:resolve', async (_event, item, endpoint) => resolveShare(item, endpoint));
-  ipcMain.handle('download:start', async (event, { raw, mode, suggestedName, engine, settings }) => {
-    const { url } = parseResource(raw);
+  ipcMain.handle('share:resolve', async (_event, item, endpoint) => {
+    if (new URL(item.url).hostname === 'pan.quark.cn') {
+      const result = await quark.listShare(item.url, item.code);
+      return { provider: '夸克网盘', files: result.files.map(file => {
+        const key = crypto.randomUUID();
+        quarkFiles.set(key, { session: result.session, file });
+        return { key, name: file.name, size: file.size };
+      }) };
+    }
+    return resolveShare(item, endpoint);
+  });
+  ipcMain.handle('download:start', async (event, { raw, mode, suggestedName, engine, settings, quarkKey }) => {
+    const quarkItem = quarkKey ? quarkFiles.get(quarkKey) : null;
+    if (quarkKey && !quarkItem) throw new Error('夸克分享会话已失效，请重新解析');
+    const source = quarkItem ? await quark.downloadLink(quarkItem.session, quarkItem.file) : { url: parseResource(raw).url, headers: {} };
+    const { url, headers } = source;
     if (engine && engine !== 'builtin') {
-      const task = await external.submit(engine, url, suggestedName, settings);
+      const task = await external.submit(engine, url, suggestedName, settings, fetch, headers);
       let polling = false;
       const timer = setInterval(async () => {
         if (polling) return;
@@ -96,7 +111,7 @@ app.whenReady().then(() => {
       handedOff.set(task.id, { task, timer });
       return { id: task.id, name: task.name, size: 0, engine, accelerated: true };
     }
-    const info = await inspectDirect(url);
+    const info = await inspectDirect(url, undefined, headers);
     const choice = await dialog.showSaveDialog(window, {
       title: '保存课程资料', defaultPath: path.join(app.getPath('downloads'), safeName(suggestedName || info.filename)),
       buttonLabel: '开始下载'
@@ -109,7 +124,7 @@ app.whenReady().then(() => {
     const started = Date.now();
     let lastSent = 0;
     const promise = download(url, destination, {
-      signal: controller.signal, mode,
+      signal: controller.signal, mode, headers,
       onProgress(received, total) {
         const now = Date.now();
         if (now - lastSent < 150 && received !== total) return;

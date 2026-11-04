@@ -67,3 +67,18 @@ test('文件夹列表会留下可下载文件', async () => {
   assert.deepEqual(calls, ['/json/parser', '/v2/getFileList']);
   assert.deepEqual(result.files, [{ name: '教材.pdf', size: 123, url: 'http://127.0.0.1:6400/d/lz/book' }]);
 });
+
+test('分享根目录只有文件夹时继续读取子目录', async () => {
+  const calls = [];
+  const mock = async raw => {
+    const url = new URL(raw); calls.push(url.pathname + url.search);
+    const data = url.pathname === '/json/parser' ? {} : url.searchParams.has('dirId')
+      ? [{ fileType: 'file', fileName: '教材.pdf', size: 2048, parserUrl: '/d/qk/book' }]
+      : [{ fileType: 'folder', fileName: '课程资料', parserUrl: '/v2/getFileList?dirId=folder1&stoken=opaque' }];
+    return { ok: true, json: async () => ({ code: 200, success: true, data }) };
+  };
+  const result = await resolveShare('https://pan.quark.cn/s/example', 'http://127.0.0.1:6400', mock);
+  assert.deepEqual(result.files, [{ name: '教材.pdf', size: 2048, url: 'http://127.0.0.1:6400/d/qk/book' }]);
+  assert.equal(calls.length, 3);
+  assert.match(calls[2], /dirId=folder1/);
+});

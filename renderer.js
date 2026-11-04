@@ -27,10 +27,10 @@ function element(name, className, text) {
   return result;
 }
 
-async function beginDownload(raw, mode = 'auto', suggestedName = '') {
+async function beginDownload(raw, mode = 'auto', suggestedName = '', quarkKey = '') {
   const engine = $('engine').value;
   const settings = { endpoint: $('engine-endpoint').value.trim(), secret: $('engine-secret').value };
-  const result = await window.suda.start(raw, mode, suggestedName, engine, settings);
+  const result = await window.suda.start(raw, mode, suggestedName, engine, settings, quarkKey);
   if (result.canceled) return;
   tasks.set(result.id, { id: result.id, name: result.name, status: '下载中', received: 0, total: result.size, seconds: 0, speed: 0, engine: result.engine || 'builtin', accelerated: result.accelerated });
   if (earlyEvents.has(result.id)) { const event = earlyEvents.get(result.id); earlyEvents.delete(result.id); updateTask(event.data, event.status); }
@@ -41,9 +41,12 @@ async function beginDownload(raw, mode = 'auto', suggestedName = '') {
 
 async function resolveCard(item) {
   const endpoint = $('parser-endpoint').value.trim();
+  const isQuark = new URL(item.url).hostname === 'pan.quark.cn';
   let host;
-  try { host = new URL(endpoint).hostname.toLowerCase(); } catch { toast('请填写有效的解析服务地址'); return; }
-  if (!['127.0.0.1', 'localhost', '[::1]'].includes(host)
+  if (!isQuark) {
+    try { host = new URL(endpoint).hostname.toLowerCase(); } catch { toast('请填写有效的解析服务地址'); return; }
+  }
+  if (!isQuark && !['127.0.0.1', 'localhost', '[::1]'].includes(host)
     && !confirm(`将这条分享链接和提取码发送至 ${host} 解析。确认继续？`)) return;
   $('parser-title').textContent = item.title;
   $('parser-status').textContent = '正在解析分享链接…';
@@ -57,13 +60,13 @@ async function resolveCard(item) {
       const info = element('div');
       info.append(element('strong', '', file.name), element('small', '', formatBytes(file.size)));
       const button = element('button', 'primary', '下载');
-      button.onclick = () => beginDownload(file.url, 'auto', file.name).catch(error => toast(error.message));
+      button.onclick = () => beginDownload(file.url || '', 'auto', file.name, file.key || '').catch(error => toast(error.message));
       row.append(info, button);
       $('parser-files').append(row);
     }
   } catch (error) {
     const local = ['127.0.0.1', 'localhost', '[::1]'].includes(host);
-    $('parser-status').textContent = local && /fetch failed|abort|ECONNREFUSED/i.test(error.message)
+    $('parser-status').textContent = !isQuark && local && /fetch failed|abort|ECONNREFUSED/i.test(error.message)
       ? '无法连接本机解析服务。请先启动 NFD Parser，或主动选择社区服务。'
       : `解析失败：${error.message}`;
   }

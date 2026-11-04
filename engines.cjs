@@ -52,22 +52,28 @@ function gopeedData(result) {
   return result.data;
 }
 
-async function submit(engine, raw, name, settings = {}, fetcher = fetch) {
+async function submit(engine, raw, name, settings = {}, fetcher = fetch, downloadHeaders = {}) {
   const url = new URL(raw);
   if (!['http:', 'https:'].includes(url.protocol)) throw new Error('下载地址必须是 HTTP 或 HTTPS');
   const endpoint = endpointFor(engine, settings.endpoint);
   const secret = String(settings.secret || '');
   if (engine === 'gdownload' && !secret) throw new Error('请填写 GDownload 设置中的 RPC 密钥');
-  const filename = safeName(name || decodeURIComponent(url.pathname.split('/').pop()) || '课程资料');
+  let pathName = url.pathname.split('/').pop() || '课程资料';
+  try { pathName = decodeURIComponent(pathName); } catch { /* retain encoded name */ }
+  const filename = safeName(name || pathName);
   if (engine === 'gopeed') {
     const headers = secret ? { 'X-Api-Token': secret } : {};
     const id = gopeedData(await postJson(`${endpoint}/api/v1/tasks`, {
-      req: { url: url.href }, opts: { name: filename }
+      req: { url: url.href, ...(Object.keys(downloadHeaders).length ? { extra: { header: downloadHeaders } } : {}) },
+      opts: { name: filename }
     }, headers, fetcher));
     if (typeof id !== 'string' || !id) throw new Error('Gopeed 未返回任务编号');
     return { id, engine, endpoint, secret, name: filename };
   }
-  const id = await ariaCall(endpoint, secret, 'addUri', [[url.href], { out: filename }], fetcher);
+  const ariaHeaders = Object.entries(downloadHeaders).map(([key, value]) => `${key}: ${value}`);
+  const id = await ariaCall(endpoint, secret, 'addUri', [[url.href], {
+    out: filename, ...(ariaHeaders.length ? { header: ariaHeaders } : {})
+  }], fetcher);
   if (typeof id !== 'string' || !id) throw new Error('GDownload 未返回任务编号');
   return { id, engine, endpoint, secret, name: filename };
 }

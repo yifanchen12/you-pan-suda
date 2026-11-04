@@ -50,6 +50,41 @@ function directFile(data, endpoint, fallbackName) {
   return { name: safeName(data.fileName || data.filename || fallback), size: Number(data.size) || 0, url };
 }
 
+function folderRoute(value, endpoint) {
+  if (!value) return null;
+  let url;
+  try { url = new URL(value, `${endpoint}/`); } catch { return null; }
+  if (url.origin !== endpoint || url.pathname !== '/v2/getFileList') return null;
+  return `${url.pathname}${url.search}`;
+}
+
+async function listedFiles(endpoint, parameters, fetcher) {
+  const root = await requestJson(endpoint, '/v2/getFileList', parameters, fetcher);
+  if (!Array.isArray(root)) throw new Error('解析服务没有返回文件列表');
+  const queue = [{ entries: root, depth: 0 }];
+  const seen = new Set();
+  const files = [];
+  while (queue.length && files.length < 500) {
+    const { entries, depth } = queue.shift();
+    for (const entry of entries) {
+      if (entry.fileType === 'folder') {
+        const route = folderRoute(entry.parserUrl, endpoint);
+        if (route && depth < 4 && !seen.has(route)) {
+          seen.add(route);
+          const children = await requestJson(endpoint, route, {}, fetcher);
+          if (Array.isArray(children)) queue.push({ entries: children, depth: depth + 1 });
+        }
+        continue;
+      }
+      const url = validDownloadUrl(entry.parserUrl, endpoint);
+      if (url) files.push({ name: safeName(entry.fileName), size: Number(entry.size) || 0, url });
+      if (files.length >= 500) break;
+    }
+  }
+  if (!files.length) throw new Error('分享中只有文件夹，解析服务没有返回可下载文件');
+  return files;
+}
+
 async function resolveShare(input, endpointInput = DEFAULT_ENDPOINT, fetcher = fetch) {
   const endpoint = normalizeEndpoint(endpointInput);
   const parsed = parseResource(`${input.url || input} ${input.code ? `提取码：${input.code}` : ''}`);
@@ -61,16 +96,10 @@ async function resolveShare(input, endpointInput = DEFAULT_ENDPOINT, fetcher = f
     if (file) return { provider: parsed.provider, files: [file], endpoint };
   } catch (error) { firstError = error; }
   try {
-    const data = await requestJson(endpoint, '/v2/getFileList', parameters, fetcher);
-    if (!Array.isArray(data) || data.length === 0) throw new Error('分享内没有可下载的文件');
-    const files = data.filter(entry => entry.fileType !== 'folder').map(entry => ({
-      name: safeName(entry.fileName), size: Number(entry.size) || 0,
-      url: validDownloadUrl(entry.parserUrl, endpoint)
-    })).filter(entry => entry.url);
-    if (files.length === 0) throw new Error('该分享是文件夹，但解析服务没有返回可下载文件');
+    const files = await listedFiles(endpoint, parameters, fetcher);
     return { provider: parsed.provider, files, endpoint };
   } catch (error) {
-    throw firstError || error;
+    throw new Error(firstError ? `${firstError.message}；文件列表：${error.message}` : error.message);
   }
 }
 
