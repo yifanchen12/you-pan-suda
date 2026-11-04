@@ -1,0 +1,15 @@
+{
+  "name": "you-pan-suda",
+  "version": "0.1.0",
+  "private": true,
+  "description": "邮盘速达：课程资料入口与直链下载工具",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.7.2"
+  },
+  "license": "MIT"
+}
