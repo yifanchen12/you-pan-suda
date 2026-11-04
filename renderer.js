@@ -3,6 +3,10 @@ let resources = [];
 const tasks = new Map();
 const earlyEvents = new Map();
 let toastTimer;
+let resolvedFiles = [];
+const batchQueue = [];
+let batchActiveId = '';
+let batchStarting = false;
 
 function toast(message) {
   const element = $('toast');
@@ -27,16 +31,35 @@ function element(name, className, text) {
   return result;
 }
 
-async function beginDownload(raw, mode = 'auto', suggestedName = '', quarkKey = '') {
-  const engine = $('engine').value;
-  const settings = { endpoint: $('engine-endpoint').value.trim(), secret: $('engine-secret').value };
-  const result = await window.suda.start(raw, mode, suggestedName, engine, settings, quarkKey);
+async function beginDownload(raw, mode = 'auto', suggestedName = '', quarkKey = '', options = {}) {
+  const engine = options.engine || $('engine').value;
+  const settings = options.settings || { endpoint: $('engine-endpoint').value.trim(), secret: $('engine-secret').value };
+  const result = await window.suda.start(raw, mode, suggestedName, engine, settings, quarkKey, options.directory || '');
   if (result.canceled) return;
   tasks.set(result.id, { id: result.id, name: result.name, status: '下载中', received: 0, total: result.size, seconds: 0, speed: 0, engine: result.engine || 'builtin', accelerated: result.accelerated });
   if (earlyEvents.has(result.id)) { const event = earlyEvents.get(result.id); earlyEvents.delete(result.id); updateTask(event.data, event.status); }
   renderTasks();
   showView('download');
-  toast(engine === 'builtin' ? '下载已开始' : '已交给下载器');
+  if (!options.silent) toast(engine === 'builtin' ? '下载已开始' : '已交给下载器');
+  return result;
+}
+
+async function pumpBatch() {
+  if (batchStarting || batchActiveId || !batchQueue.length) return;
+  batchStarting = true;
+  const job = batchQueue.shift();
+  try {
+    const result = await beginDownload(job.file.url || '', job.mode, job.file.name,
+      job.file.key || '', { engine: job.engine, settings: job.settings, directory: job.directory, silent: true });
+    if (result?.id) {
+      batchActiveId = result.id;
+      if (['完成', '失败'].includes(tasks.get(result.id)?.status)) batchActiveId = '';
+    }
+  } catch (error) { toast(`${job.file.name}：${error.message}`); }
+  finally {
+    batchStarting = false;
+    if (!batchActiveId && batchQueue.length) queueMicrotask(pumpBatch);
+  }
 }
 
 async function resolveCard(item) {
@@ -44,32 +67,60 @@ async function resolveCard(item) {
   const isQuark = new URL(item.url).hostname === 'pan.quark.cn';
   let host;
   if (!isQuark) {
-    try { host = new URL(endpoint).hostname.toLowerCase(); } catch { toast('请填写有效的解析服务地址'); return; }
+    try { host = new URL(endpoint).hostname.toLowerCase(); } catch { toast('请填写有效的解析服务地址'); return false; }
   }
   if (!isQuark && !['127.0.0.1', 'localhost', '[::1]'].includes(host)
-    && !confirm(`将这条分享链接和提取码发送至 ${host} 解析。确认继续？`)) return;
+    && !confirm(`将这条分享链接和提取码发送至 ${host} 解析。确认继续？`)) return false;
   $('parser-title').textContent = item.title;
   $('parser-status').textContent = '正在解析分享链接…';
   $('parser-files').replaceChildren();
+  $('parser-actions').classList.add('hidden');
+  $('select-all').checked = false;
+  resolvedFiles = [];
   $('parser-modal').classList.remove('hidden');
   try {
     const result = await window.suda.resolve(item, endpoint);
     $('parser-status').textContent = `找到 ${result.files.length} 个可下载文件 · ${result.provider}`;
+    resolvedFiles = result.files;
     for (const file of result.files) {
-      const row = element('div', 'parser-file');
+      const row = element('label', 'parser-file');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'file-choice';
       const info = element('div');
       info.append(element('strong', '', file.name), element('small', '', formatBytes(file.size)));
-      const button = element('button', 'primary', '下载');
-      button.onclick = () => beginDownload(file.url || '', 'auto', file.name, file.key || '').catch(error => toast(error.message));
-      row.append(info, button);
+      row.append(checkbox, info);
       $('parser-files').append(row);
     }
+    $('parser-actions').classList.toggle('hidden', !result.files.length);
+    return true;
   } catch (error) {
     const local = ['127.0.0.1', 'localhost', '[::1]'].includes(host);
     $('parser-status').textContent = !isQuark && local && /fetch failed|abort|ECONNREFUSED/i.test(error.message)
       ? '无法连接本机解析服务。请先启动 NFD Parser，或主动选择社区服务。'
       : `解析失败：${error.message}`;
+    return false;
   }
+}
+
+function selectedFiles() {
+  return [...document.querySelectorAll('#parser-files .file-choice')]
+    .flatMap((box, index) => box.checked ? [resolvedFiles[index]] : []);
+}
+
+async function downloadSelected() {
+  const files = selectedFiles();
+  if (!files.length) { toast('请先勾选文件'); return; }
+  const engine = $('engine').value;
+  const settings = { endpoint: $('engine-endpoint').value.trim(), secret: $('engine-secret').value };
+  const directory = engine === 'builtin' ? await window.suda.chooseFolder() : '';
+  if (engine === 'builtin' && !directory) return;
+  const mode = $('download-mode').value;
+  batchQueue.push(...files.map(file => ({ file, engine, settings, directory, mode })));
+  $('parser-modal').classList.add('hidden');
+  showView('download');
+  toast(`已加入 ${files.length} 个下载任务`);
+  void pumpBatch();
 }
 
 function renderLibrary() {
@@ -116,7 +167,7 @@ function showView(name) {
   $('download-view').classList.toggle('hidden', name !== 'download');
   document.querySelectorAll('.side-link').forEach(button => button.classList.toggle('active', button.dataset.view === name));
   $('page-title').textContent = name === 'library' ? '课程资料库' : '下载加速';
-  $('page-subtitle').textContent = name === 'library' ? '把老师发在不同网盘的教材和课件，放到一个清楚的入口。' : '支持分段的直链会使用最多 4 路下载，并显示实时速度。';
+  $('page-subtitle').textContent = name === 'library' ? '把老师发在不同网盘的教材和课件，放到一个清楚的入口。' : '粘贴分享链接，选择文件并保存到电脑。';
 }
 
 function updateTask(data, status) {
@@ -190,6 +241,9 @@ $('parser-endpoint').onchange = () => localStorage.setItem('parser-endpoint', $(
 $('community-parser').onclick = () => { $('parser-endpoint').value = 'https://lz.qaiu.top'; $('parser-endpoint').dispatchEvent(new Event('change')); toast('已选择社区解析服务；解析前会再次确认发送链接'); };
 $('close-parser').onclick = () => $('parser-modal').classList.add('hidden');
 $('parser-modal').onclick = event => { if (event.target === $('parser-modal')) $('parser-modal').classList.add('hidden'); };
+$('select-all').onchange = () => document.querySelectorAll('#parser-files .file-choice')
+  .forEach(box => { box.checked = $('select-all').checked; });
+$('download-selected').onclick = () => downloadSelected().catch(error => toast(error.message));
 $('raw-link').oninput = async () => {
   try { const value = await window.suda.parse($('raw-link').value); $('detected').textContent = `${value.provider}${value.code ? ` · 提取码 ${value.code}` : ''}`; }
   catch { $('detected').textContent = '粘贴后自动识别网盘'; }
@@ -203,20 +257,34 @@ $('add-form').onsubmit = async event => {
     renderLibrary(); toast('资料卡已保存');
   } catch (error) { toast(error.message); }
 };
-$('inspect').onclick = async () => {
+async function handlePastedLink(downloadNow) {
   const target = $('inspect-result'); target.textContent = '正在检查下载源…';
   try {
-    const info = await window.suda.inspect($('direct-url').value);
-    target.textContent = `${info.filename} · ${formatBytes(info.size)} · ${info.ranges && info.size >= 2 * 1024 * 1024 ? '可使用分段下载' : '单路下载'}`;
-  } catch (error) { target.textContent = `检查失败：${error.message}`; }
-};
-$('start-download').onclick = async () => {
-  try {
     const raw = $('direct-url').value;
-    await beginDownload(raw, $('download-mode').value);
-  } catch (error) { toast(error.message); }
-};
+    const parsed = await window.suda.parse(raw);
+    if (parsed.provider !== '其他网盘/网站') {
+      target.textContent = `${parsed.provider} · 正在列出文件`;
+      const shown = await resolveCard({ ...parsed, title: parsed.provider });
+      target.textContent = shown ? `${parsed.provider} · 请在文件列表中勾选后下载` : '未能列出分享文件，请查看提示';
+      return;
+    }
+    if (downloadNow) await beginDownload(raw, $('download-mode').value);
+    else {
+      const info = await window.suda.inspect(raw);
+      target.textContent = `${info.filename} · ${formatBytes(info.size)} · ${info.ranges && info.size >= 2 * 1024 * 1024 ? '可使用分段下载' : '单路下载'}`;
+    }
+  } catch (error) { target.textContent = `检查失败：${error.message}`; }
+}
+$('inspect').onclick = () => handlePastedLink(false);
+$('start-download').onclick = () => handlePastedLink(true);
 window.suda.onProgress(data => updateTask(data));
-window.suda.onComplete(data => { updateTask(data, '完成'); toast('下载完成'); });
-window.suda.onError(data => { updateTask(data, '失败'); toast(data.message); });
+window.suda.onComplete(data => {
+  updateTask(data, '完成'); toast('下载完成');
+  if (data.id === batchActiveId) { batchActiveId = ''; void pumpBatch(); }
+});
+window.suda.onError(data => {
+  updateTask(data, '失败'); toast(data.message);
+  if (data.id === batchActiveId) { batchActiveId = ''; void pumpBatch(); }
+});
+showView('download');
 window.suda.list().then(items => { resources = items; renderLibrary(); }).catch(error => toast(error.message));

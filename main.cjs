@@ -6,11 +6,13 @@ const { parseResource, safeName, inspectDirect, download } = require('./lib.cjs'
 const { resolveShare } = require('./parser.cjs');
 const external = require('./engines.cjs');
 const quark = require('./quark.cjs');
+const { nextAvailablePath, releasePath } = require('./destination.cjs');
 
 let window;
 const active = new Map();
 const handedOff = new Map();
 const quarkFiles = new Map();
+const chosenDirectories = new Set();
 const dataFile = () => path.join(app.getPath('userData'), 'resources.json');
 
 async function readResources() {
@@ -70,6 +72,16 @@ app.whenReady().then(() => {
     const { url } = parseResource(raw);
     return inspectDirect(url);
   });
+  ipcMain.handle('download:choose-directory', async () => {
+    const choice = await dialog.showOpenDialog(window, {
+      title: '选择课程资料保存位置', defaultPath: app.getPath('downloads'),
+      properties: ['openDirectory', 'createDirectory'], buttonLabel: '保存到这里'
+    });
+    if (choice.canceled || !choice.filePaths[0]) return '';
+    const directory = path.resolve(choice.filePaths[0]);
+    chosenDirectories.add(directory);
+    return directory;
+  });
   ipcMain.handle('share:resolve', async (_event, item, endpoint) => {
     if (new URL(item.url).hostname === 'pan.quark.cn') {
       const result = await quark.listShare(item.url, item.code);
@@ -81,7 +93,7 @@ app.whenReady().then(() => {
     }
     return resolveShare(item, endpoint);
   });
-  ipcMain.handle('download:start', async (event, { raw, mode, suggestedName, engine, settings, quarkKey }) => {
+  ipcMain.handle('download:start', async (event, { raw, mode, suggestedName, engine, settings, quarkKey, directory }) => {
     const quarkItem = quarkKey ? quarkFiles.get(quarkKey) : null;
     if (quarkKey && !quarkItem) throw new Error('夸克分享会话已失效，请重新解析');
     const source = quarkItem ? await quark.downloadLink(quarkItem.session, quarkItem.file) : { url: parseResource(raw).url, headers: {} };
@@ -112,15 +124,21 @@ app.whenReady().then(() => {
       return { id: task.id, name: task.name, size: 0, engine, accelerated: true };
     }
     const info = await inspectDirect(url, undefined, headers);
-    const choice = await dialog.showSaveDialog(window, {
-      title: '保存课程资料', defaultPath: path.join(app.getPath('downloads'), safeName(suggestedName || info.filename)),
-      buttonLabel: '开始下载'
-    });
-    if (choice.canceled || !choice.filePath) return { canceled: true };
+    let destination;
+    if (directory) {
+      if (!chosenDirectories.has(path.resolve(directory))) throw new Error('请重新选择保存文件夹');
+      destination = await nextAvailablePath(directory, suggestedName || info.filename);
+    } else {
+      const choice = await dialog.showSaveDialog(window, {
+        title: '保存课程资料', defaultPath: path.join(app.getPath('downloads'), safeName(suggestedName || info.filename)),
+        buttonLabel: '开始下载'
+      });
+      if (choice.canceled || !choice.filePath) return { canceled: true };
+      destination = choice.filePath;
+    }
     const id = crypto.randomUUID();
     const controller = new AbortController();
     active.set(id, controller);
-    const destination = choice.filePath;
     const started = Date.now();
     let lastSent = 0;
     const promise = download(url, destination, {
@@ -135,7 +153,7 @@ app.whenReady().then(() => {
       event.sender.send('download:complete', { id, destination, ...result });
     }).catch(error => {
       event.sender.send('download:error', { id, message: controller.signal.aborted ? '已暂停，可再次下载以续传' : error.message });
-    }).finally(() => active.delete(id));
+    }).finally(() => { active.delete(id); releasePath(destination); });
     void promise;
     return { id, destination, size: info.size, name: safeName(suggestedName || info.filename), accelerated: mode !== 'single' && info.ranges && info.size >= 2 * 1024 * 1024 };
   });

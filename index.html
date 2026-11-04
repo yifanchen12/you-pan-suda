@@ -12,14 +12,14 @@
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">邮</span><div><strong>邮盘速达</strong><small>课程资料，一处整理</small></div></div>
       <div class="side-label">工作区</div>
-      <button class="side-link active" data-view="library">▦ <span>资料库</span></button>
-      <button class="side-link" data-view="download">⇣ <span>下载加速</span></button>
+      <button class="side-link" data-view="library">▦ <span>资料库</span></button>
+      <button class="side-link active" data-view="download">⇣ <span>下载加速</span></button>
       <div class="sidebar-bottom"><span class="pulse"></span>资料只保存在这台电脑</div>
     </aside>
     <main>
-      <header class="topbar"><div><div class="eyebrow">BUPT · STUDY RESOURCES</div><h1 id="page-title">课程资料库</h1><p id="page-subtitle">把老师发在不同网盘的教材和课件，放到一个清楚的入口。</p></div><div class="top-badge">本地桌面版 <span>v0.1</span></div></header>
+      <header class="topbar"><div><div class="eyebrow">BUPT · STUDY RESOURCES</div><h1 id="page-title">下载加速</h1><p id="page-subtitle">粘贴分享链接，选择文件并保存到电脑。</p></div><div class="top-badge">本地桌面版 <span>v0.1</span></div></header>
       <div class="engine-bar"><label>下载器 <select id="engine"><option value="builtin">邮盘速达内置</option><option value="gopeed">Gopeed</option><option value="gdownload">GDownload</option></select></label><label id="engine-endpoint-wrap" class="hidden">本机接口 <input id="engine-endpoint" type="url" placeholder="http://127.0.0.1:9999"></label><label id="engine-secret-wrap" class="hidden">接口密钥 <input id="engine-secret" type="password" autocomplete="off" placeholder="未设置可留空"></label><small id="engine-hint">内置下载器使用最多 4 路分段。</small></div>
-      <section id="library-view" class="view">
+      <section id="library-view" class="view hidden">
         <div class="hero"><div><div class="hero-kicker">统一整理</div><h2>链接不再散落在群聊里</h2><p>粘贴分享文案，自动识别平台与提取码，再按课程收好。所有平台都能建立资料卡。</p></div><div class="hero-art"><div class="art-card">PDF <span>通信原理</span></div><div class="art-card second">DOC <span>课堂讲义</span></div><div class="art-link">↗</div></div></div>
         <div class="section-heading"><div><h2>我的资料</h2><span id="count">0 份资料</span></div><button id="add-toggle" class="primary">＋ 添加资料</button></div>
         <form id="add-form" class="panel hidden"><div class="form-title">添加课程资料 <button type="button" id="close-form" class="text-button">收起</button></div><label>分享文案或链接<textarea id="raw-link" placeholder="粘贴老师发来的网盘链接，提取码也可以一同粘贴" required></textarea></label><div class="form-row"><label>资料名称<input id="resource-title" placeholder="例如：高等数学教材"></label><label>课程<input id="course" placeholder="例如：高等数学"></label></div><label>备注<input id="note" placeholder="版本、授课老师或使用说明（可选）"></label><div class="form-footer"><span id="detected">粘贴后自动识别网盘</span><button class="primary" type="submit">保存资料卡</button></div></form>
@@ -28,14 +28,14 @@
         <div id="library" class="cards"></div>
         <div id="empty" class="empty"><div class="empty-icon">▤</div><h3>还没有资料</h3><p>先把一条课程网盘链接收进来。</p></div>
       </section>
-      <section id="download-view" class="view hidden">
-        <div class="download-grid"><div class="panel download-panel"><div class="mini-label">DIRECT DOWNLOAD</div><h2>直链下载</h2><p>粘贴可直接访问的文件地址。也可以在资料库解析分享链接，再把文件交给上方选择的下载器。</p><label>文件直链<input id="direct-url" type="url" placeholder="https://example.com/course.pdf"></label><label class="mode-label">内置传输方式<select id="download-mode"><option value="auto">自动分段（推荐）</option><option value="single">单路传输（速度对照）</option></select></label><div class="download-actions"><button id="inspect" class="secondary">检查下载源</button><button id="start-download" class="primary">开始下载</button></div><div id="inspect-result" class="inspect-result">等待检查下载源</div></div><div class="panel how-panel"><div class="mini-label">HOW IT WORKS</div><h2>按来源选择下载方式</h2><div class="how-step"><b>01</b><div><strong>解析分享链接</strong><span>本机 NFD Parser 可把它支持的网盘分享转成文件地址。</span></div></div><div class="how-step"><b>02</b><div><strong>交给下载器</strong><span>内置下载器、Gopeed 或 GDownload 接收文件地址。外部下载器须先启动并开启本机接口。</span></div></div><div class="how-step"><b>03</b><div><strong>实测传输速度</strong><span>多连接可能改善传输，但不能保证突破网盘服务器的限速。</span></div></div></div></div>
+      <section id="download-view" class="view">
+        <div class="download-grid"><div class="panel download-panel"><div class="mini-label">PASTE & DOWNLOAD</div><h2>粘贴链接，选择文件下载</h2><p>粘贴老师发来的网盘分享链接或文件直链。夸克分享可直接列出文件；其他网盘使用你选择的解析服务。</p><label>分享链接或文件直链<textarea id="direct-url" placeholder="https://pan.quark.cn/s/..."></textarea></label><label class="mode-label">内置传输方式<select id="download-mode"><option value="auto">自动分段（推荐）</option><option value="single">单路传输（速度对照）</option></select></label><div class="download-actions"><button id="inspect" class="secondary">查看文件</button><button id="start-download" class="primary">下载</button></div><div id="inspect-result" class="inspect-result">粘贴链接后点击“查看文件”或“下载”</div></div><div class="panel how-panel"><div class="mini-label">HOW IT WORKS</div><h2>下载课程资料</h2><div class="how-step"><b>01</b><div><strong>粘贴链接</strong><span>直接粘贴分享链接；无需先保存资料卡。</span></div></div><div class="how-step"><b>02</b><div><strong>选择文件</strong><span>一个分享里有多个文件时，勾选需要的内容。</span></div></div><div class="how-step"><b>03</b><div><strong>选择保存位置</strong><span>内置下载器只需选择一次文件夹，随后依次下载选中的文件。</span></div></div></div></div>
         <div class="section-heading"><div><h2>本次下载</h2><span>实时传输状态</span></div></div><div id="downloads" class="download-list"><div class="empty-inline">尚无下载任务</div></div>
       </section>
       <footer>邮盘速达 · 为课程资料整理而做</footer>
     </main>
   </div>
-  <div id="parser-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><span class="mini-label">SHARE PARSER</span><h2 id="parser-title">解析分享文件</h2></div><button id="close-parser" type="button" aria-label="关闭">×</button></div><p id="parser-status">正在解析…</p><div id="parser-files" class="parser-files"></div></div></div>
+  <div id="parser-modal" class="modal hidden"><div class="modal-card"><div class="modal-head"><div><span class="mini-label">SHARE PARSER</span><h2 id="parser-title">解析分享文件</h2></div><button id="close-parser" type="button" aria-label="关闭">×</button></div><p id="parser-status">正在解析…</p><div id="parser-files" class="parser-files"></div><div id="parser-actions" class="parser-actions hidden"><label><input id="select-all" type="checkbox"> 全选</label><button id="download-selected" class="primary" type="button">下载选中</button></div></div></div>
   <div id="toast" role="status"></div>
   <script src="renderer.js"></script>
 </body>
