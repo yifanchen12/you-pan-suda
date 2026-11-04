@@ -10,7 +10,7 @@ let batchStarting = false;
 
 function toast(message) {
   const element = $('toast');
-  element.textContent = message;
+  element.textContent = String(message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '');
   element.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => element.classList.remove('show'), 3500);
@@ -108,11 +108,23 @@ function selectedFiles() {
     .flatMap((box, index) => box.checked ? [resolvedFiles[index]] : []);
 }
 
+async function selectedEngine() {
+  let engine = $('engine').value;
+  let settings = { endpoint: $('engine-endpoint').value.trim(), secret: $('engine-secret').value };
+  if (engine !== 'builtin' && !(await window.suda.engineAvailable(engine, settings))) {
+    toast(`${engine === 'gopeed' ? 'Gopeed' : 'GDownload'} 未启动，改用内置下载器`);
+    engine = 'builtin';
+    $('engine').value = engine;
+    configureEngine();
+    settings = {};
+  }
+  return { engine, settings };
+}
+
 async function downloadSelected() {
   const files = selectedFiles();
   if (!files.length) { toast('请先勾选文件'); return; }
-  const engine = $('engine').value;
-  const settings = { endpoint: $('engine-endpoint').value.trim(), secret: $('engine-secret').value };
+  const { engine, settings } = await selectedEngine();
   const directory = engine === 'builtin' ? await window.suda.chooseFolder() : '';
   if (engine === 'builtin' && !directory) return;
   const mode = $('download-mode').value;
@@ -232,7 +244,7 @@ function configureEngine() {
   $('download-mode').disabled = external;
   localStorage.setItem('engine', engine);
 }
-$('engine').value = localStorage.getItem('engine') || 'builtin';
+$('engine').value = 'builtin';
 $('engine').onchange = configureEngine;
 $('engine-endpoint').onchange = () => localStorage.setItem(`${$('engine').value}-endpoint`, $('engine-endpoint').value.trim());
 configureEngine();
@@ -268,7 +280,10 @@ async function handlePastedLink(downloadNow) {
       target.textContent = shown ? `${parsed.provider} · 请在文件列表中勾选后下载` : '未能列出分享文件，请查看提示';
       return;
     }
-    if (downloadNow) await beginDownload(raw, $('download-mode').value);
+    if (downloadNow) {
+      const { engine, settings } = await selectedEngine();
+      await beginDownload(raw, $('download-mode').value, '', '', { engine, settings });
+    }
     else {
       const info = await window.suda.inspect(raw);
       target.textContent = `${info.filename} · ${formatBytes(info.size)} · ${info.ranges && info.size >= 2 * 1024 * 1024 ? '可使用分段下载' : '单路下载'}`;

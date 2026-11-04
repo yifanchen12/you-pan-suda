@@ -12,6 +12,18 @@ function endpointFor(engine, value) {
   return url.origin;
 }
 
+async function available(engine, settings = {}, fetcher = fetch) {
+  const endpoint = endpointFor(engine, settings.endpoint);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+  try {
+    const response = await fetcher(endpoint, { method: 'GET', signal: controller.signal });
+    await response.body?.cancel();
+    return true;
+  } catch { return false; }
+  finally { clearTimeout(timer); }
+}
+
 async function postJson(url, body, headers = {}, fetcher = fetch, method = 'POST') {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
@@ -98,4 +110,4 @@ async function pause(task, fetcher = fetch) {
   } else await ariaCall(task.endpoint, task.secret, 'pause', [task.id], fetcher);
 }
 
-module.exports = { DEFAULTS, endpointFor, submit, status, pause };
+module.exports = { DEFAULTS, endpointFor, available, submit, status, pause };

@@ -82,6 +82,7 @@ app.whenReady().then(() => {
     chosenDirectories.add(directory);
     return directory;
   });
+  ipcMain.handle('download:engine-available', (_event, engine, settings) => external.available(engine, settings));
   ipcMain.handle('share:resolve', async (_event, item, endpoint) => {
     if (new URL(item.url).hostname === 'pan.quark.cn') {
       const result = await quark.listShare(item.url, item.code);
@@ -99,7 +100,14 @@ app.whenReady().then(() => {
     const source = quarkItem ? await quark.downloadLink(quarkItem.session, quarkItem.file) : { url: parseResource(raw).url, headers: {} };
     const { url, headers } = source;
     if (engine && engine !== 'builtin') {
-      const task = await external.submit(engine, url, suggestedName, settings, fetch, headers);
+      let task;
+      try { task = await external.submit(engine, url, suggestedName, settings, fetch, headers); }
+      catch (error) {
+        if (/fetch failed|ECONNREFUSED|abort/i.test(error.message)) {
+          throw new Error(`${engine === 'gopeed' ? 'Gopeed' : 'GDownload'} 本机接口无法连接，请改用内置下载器`);
+        }
+        throw error;
+      }
       let polling = false;
       const timer = setInterval(async () => {
         if (polling) return;

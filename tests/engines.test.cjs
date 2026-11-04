@@ -1,11 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { endpointFor, submit, status, pause } = require('../engines.cjs');
+const { endpointFor, available, submit, status, pause } = require('../engines.cjs');
 
 test('下载器接口只允许本机地址', () => {
   assert.equal(endpointFor('gopeed', 'http://localhost:9999/'), 'http://localhost:9999');
   assert.throws(() => endpointFor('gopeed', 'https://example.com'), /本机/);
   assert.throws(() => endpointFor('gdownload', 'http://127.0.0.1:16888/jsonrpc'), /根地址/);
+});
+
+test('外部下载器未运行时可切换到内置下载器', async () => {
+  assert.equal(await available('gopeed', {}, async () => { throw new TypeError('fetch failed'); }), false);
+  assert.equal(await available('gopeed', {}, async () => ({ ok: false, status: 404 })), true);
 });
 
 test('Gopeed 接收文件地址并返回进度', async () => {
