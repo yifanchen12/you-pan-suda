@@ -1,0 +1,6 @@
+node_modules/
+*.part
+*.part.*
+*.downloading
+*.log
+.DS_Store
