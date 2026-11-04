@@ -13,6 +13,8 @@ npm install
 npm start
 ```
 
+Windows 可在安装依赖后双击 `启动邮盘速达.cmd`；当前工作区已有 Electron，可直接双击运行。
+
 运行测试：`npm test`。运行本机限速源测速：`npm run benchmark`。Windows、macOS、Linux 均可通过 Electron 源码运行；目前还没有安装包。
 
 ## 使用
